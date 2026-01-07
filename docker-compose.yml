@@ -15,7 +15,21 @@ services:
     build: ./project-manager-agent
     container_name: project-manager-agent
     env_file:
-      - ./project-manager-agent/.env  # Указываем путь к .env в подпапке
+      - ./project-manager-agent/.env # Указываем путь к .env в подпапке
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    # Для разработки можно добавить volumes:
+    # volumes:
+    #   - ./project-manager-agent/src:/app/src
+    #   - ./project-manager-agent/.env:/app/.env
+  code-reviewer-agent:
+    build: ./code-reviewer-agent
+    container_name: code-reviewer-agent
+    env_file:
+      - ./code-reviewer-agent/.env # Указываем путь к .env в подпапке
     ports:
       - "3001:3001"
     environment:

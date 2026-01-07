@@ -1,19 +1,17 @@
-import * as dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import * as dotenv from "dotenv";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: resolve(__dirname, '../.env') });
+dotenv.config({ path: resolve(__dirname, "../.env") });
 
-console.log('Groq API Key:', process.env.GROQ_API_KEY ? 'Loaded' : 'Missing');
+console.log("Groq API Key:", process.env.GROQ_API_KEY ? "Loaded" : "Missing");
 
-// Меняем импорт с OpenAI на Groq
-import Groq from "groq-sdk";  // <-- НОВЫЙ ИМПОРТ
-import { PlanSchema, PlanResult } from "../schemas/plan.schema.js";
+import Groq from "groq-sdk";
+import { PlanResult, PlanSchema } from "../schemas/plan.schema.js";
 
-// Меняем клиент
 const client = new Groq({
   apiKey: process.env.GROQ_API_KEY,
   // Дополнительные опции при необходимости:
@@ -48,27 +46,26 @@ export async function buildPlan(input: {
 `;
 
   const completion = await client.chat.completions.create({
-    // Выберите одну из моделей Groq:
     model: "llama-3.3-70b-versatile",
-    
+
     messages: [
-      { 
-        role: "system", 
-        content: systemPrompt 
+      {
+        role: "system",
+        content: systemPrompt,
       },
-      { 
-        role: "user", 
-        content: userPrompt 
-      }
+      {
+        role: "user",
+        content: userPrompt,
+      },
     ],
     response_format: { type: "json_object" },
-    temperature: 0.1,  // Низкая для структурированных ответов
+    temperature: 0.1, // Низкая для структурированных ответов
     max_tokens: 1024,
   });
 
   const raw = JSON.parse(completion.choices[0].message.content!);
-  
-  console.log('AI Agent answer:', '\n', JSON.stringify(raw, null, 2));
+
+  console.log("AI Agent answer:", "\n", JSON.stringify(raw, null, 2));
 
   // 🔒 валидация
   return PlanSchema.parse(raw);
