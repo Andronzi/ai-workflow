@@ -1,3 +1,4 @@
+// run.ts
 import { runReasoningLoop } from "../../../packages/common/src/reasoning/abstract-engine.js";
 import { ReasoningEvent } from "../../../packages/common/src/reasoning/event-types.ts";
 import { CodeReviewStrategy } from "./strategy.ts";
@@ -13,14 +14,12 @@ export async function runCodeReview({
 }) {
   return runReasoningLoop(
     CodeReviewStrategy,
-    { diff },
+    { diff, context },
     {
-      maxIterations: 7,
+      maxIterations: 5,
       onEvent: (params: ReasoningEvent) => {
         logger(
-          `[Reasoning][Iter ${params.type}][${params.step || "последний шаг"}[${
-            params.state
-          }][${params.result}]]`
+          `[Reasoning][Iter ${params.state?.iteration || 0}][${params.step || "unknown"}] ${params.type || ""}`
         );
       },
     }

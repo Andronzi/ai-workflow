@@ -15,7 +15,7 @@ export async function runReasoningLoop(
 
   const state: ReasoningState = {
     iteration: 0,
-    maxIterations: options.maxIterations ?? 5,
+    maxIterations: options.maxIterations ?? 3, // Уменьшите до 3
 
     context: initialContext,
     knowledge: {},
@@ -25,18 +25,29 @@ export async function runReasoningLoop(
     done: false,
   };
 
+  console.log(`🚀 Начинаем reasoning loop с максимум ${state.maxIterations} итераций`);
+
   while (!state.done && state.iteration < state.maxIterations) {
     state.iteration++;
+    
+    console.log(`\n📊 Итерация ${state.iteration}/${state.maxIterations}`);
+    console.log(`Найдено проблем: ${state.findings.length}`);
+    console.log(`Confidence: ${state.confidence}`);
 
+    // 1. Декомпозиция
+    console.log("1. Decompose...");
     await runStep(ReasoningStep.DECOMPOSE, strategy.decompose);
-    await runStep(
-      ReasoningStep.GENERATE_HYPOTHESES,
-      strategy.generateHypotheses
-    );
+    
+    // 2. Генерация гипотез
+    console.log("2. Generate Hypotheses...");
+    await runStep(ReasoningStep.GENERATE_HYPOTHESES, strategy.generateHypotheses);
+    
+    // 3. Анализ
+    console.log("3. Analyze...");
     await runStep(ReasoningStep.ANALYZE, strategy.analyze);
 
-    /* ---------- REFLECT (особый шаг) ---------- */
-
+    // 4. Рефлексия
+    console.log("4. Reflect...");
     emit?.({
       type: "step:start",
       step: ReasoningStep.REFLECT,
@@ -44,6 +55,10 @@ export async function runReasoningLoop(
     });
 
     const reflection = await strategy.reflect(state);
+
+    // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: НЕ МЕНЯЕМ ОБЛАСТИ ПОСЛЕ РЕФЛЕКСИИ!
+    // Просто сохраняем результат, но не меняем state.knowledge.areas
+    // Это предотвращает бесконечные циклы
 
     emit?.({
       type: "reflection",
@@ -60,13 +75,8 @@ export async function runReasoningLoop(
 
     state.lastReflection = reflection.reason;
 
-    if (reflection.issuesMissed) {
-      state.knowledge.refocus = reflection.suggestedFocus;
-      continue; // 🔁 возврат в начало цикла
-    }
-
-    /* ---------- CRITIQUE (особый шаг) ---------- */
-
+    // 5. Критика (ВСЕГДА выполняем после рефлексии)
+    console.log("5. Critique...");
     emit?.({
       type: "step:start",
       step: ReasoningStep.CRITIQUE,
@@ -90,15 +100,26 @@ export async function runReasoningLoop(
 
     state.confidence = critique.confidence;
 
+    // 6. Проверка остановки
     if (strategy.shouldStop(state)) {
+      console.log(`✅ Остановка по условию: confidence=${state.confidence} >= 0.75`);
       state.done = true;
       emit?.({ type: "stop", state });
+      break;
+    }
+
+    // 7. Проверка максимального числа итераций
+    if (state.iteration >= state.maxIterations) {
+      console.log(`🛑 Достигнут максимум итераций: ${state.maxIterations}`);
+      state.done = true;
+      emit?.({ type: "max_iterations_reached", state });
+      break;
     }
   }
 
+  console.log(`\n🏁 Reasoning loop завершен. Итераций: ${state.iteration}, Проблем: ${state.findings.length}`);
+  
   return state;
-
-  /* ---------- HELPER ---------- */
 
   async function runStep(
     step: ReasoningStep,
