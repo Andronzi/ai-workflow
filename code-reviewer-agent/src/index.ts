@@ -9,7 +9,7 @@ import { runCodeReview } from "./reasoning/run.js";
 dotenv.config();
 
 const app = express();
-app.use(bodyParser.json({ limit: "10mb" })); // Увеличиваем лимит для больших диффов
+app.use(bodyParser.json({ limit: "10mb" }));
 
 let tasksProcessed = 0;
 
@@ -19,9 +19,9 @@ app.post("/mcp", async (req: Request, res: Response) => {
     message = MCPMessageSchema.parse(req.body);
   } catch (err: any) {
     console.error("❌ Ошибка валидации:", err.errors);
-    return res.status(400).json({ 
-      error: "Invalid MCP message", 
-      details: err.errors 
+    return res.status(400).json({
+      error: "Invalid MCP message",
+      details: err.errors,
     });
   }
 
@@ -29,25 +29,22 @@ app.post("/mcp", async (req: Request, res: Response) => {
 
   logger.info("MCP message received", {
     sender: message.sender,
-    target: message.target, 
+    target: message.target,
     type: message.type,
     traceId: message.traceId,
     hasDiff: !!message.payload.diff,
     hasContext: !!message.payload.context,
-    contextKeys: message.payload.context ? Object.keys(message.payload.context) : []
+    contextKeys: message.payload.context
+      ? Object.keys(message.payload.context)
+      : [],
   });
 
   try {
     const startTime = Date.now();
-    
+
     const result = await runCodeReview({
       diff: message.payload.diff,
       context: message.payload.context || {},
-      logger: (msg: string) => {
-        logger.info(msg);
-        // Также выводим в консоль для отладки
-        console.log(`[${message.traceId}] ${msg}`);
-      }
     });
 
     const endTime = Date.now();
@@ -57,7 +54,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
       durationMs: duration,
       iterations: result.iteration || 0,
       findingsCount: result.findings?.length || 0,
-      confidence: result.confidence || 0
+      confidence: result.confidence || 0,
     });
 
     // Форматируем ответ
@@ -66,35 +63,34 @@ app.post("/mcp", async (req: Request, res: Response) => {
       status: "success",
       review: {
         findings: result.findings || [],
-        summary: result.findings?.length 
+        summary: result.findings?.length
           ? `Найдено ${result.findings.length} проблем`
           : "Проблем не найдено",
         confidence: result.confidence || 0,
         iterations: result.iteration || 0,
-        durationMs: duration
+        durationMs: duration,
       },
       traceId: message.traceId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     console.log("✅ Отправляем ответ:", JSON.stringify(response, null, 2));
     res.json(response);
-    
   } catch (err: any) {
     console.error("❌ Критическая ошибка:", err);
     logger.info("Error during code review", {
       error: err.message,
       stack: err.stack,
-      name: err.name
+      name: err.name,
     });
 
     res.status(500).json({
-      agent: "code-reviewer", 
+      agent: "code-reviewer",
       status: "error",
       error: "Internal server error",
       details: err.message,
       traceId: message.traceId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -105,7 +101,7 @@ app.get("/health", (req: Request, res: Response) => {
     agent: "code-reviewer",
     uptime: process.uptime(),
     tasksProcessed,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -115,9 +111,9 @@ app.get("/", (req: Request, res: Response) => {
     version: "1.0.0",
     endpoints: {
       mcp: "POST /mcp",
-      health: "GET /health"
+      health: "GET /health",
     },
-    supportedTypes: ["code-review"]
+    supportedTypes: ["code-review"],
   });
 });
 

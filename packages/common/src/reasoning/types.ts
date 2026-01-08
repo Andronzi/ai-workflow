@@ -1,3 +1,4 @@
+import { Logger } from "openai/client.js";
 import { ReasoningEvent } from "./event-types.ts";
 
 export interface ReasoningState {
@@ -36,5 +37,11 @@ export interface AgentReasoningStrategy {
 
 export interface RunReasoningOptions {
   maxIterations?: number;
+  logger: Logger;
+  stepTimeoutMs: number;
+  stopIfConfidenceAtLeast: number;
+  snapshotStateForEvents?: boolean;
+  awaitEvents?: boolean;
+  signal?: AbortController;
   onEvent?: (params: ReasoningEvent) => void;
 }

@@ -6,16 +6,35 @@ import {
   RunReasoningOptions,
 } from "./types.js";
 
+type Logger = {
+  debug?: (...args: any[]) => void;
+  info?: (...args: any[]) => void;
+  warn?: (...args: any[]) => void;
+  error?: (...args: any[]) => void;
+};
+
 export async function runReasoningLoop(
   strategy: AgentReasoningStrategy,
   initialContext: any,
-  options: RunReasoningOptions = {}
+  options: RunReasoningOptions
 ): Promise<ReasoningState> {
-  const emit = options.onEvent;
+  const logger: Logger = options.logger;
+  const awaitEvents = options.awaitEvents;
+  const snapshotStateForEvents = options.snapshotStateForEvents;
+  const stepTimeoutMs = options.stepTimeoutMs;
+  const stopIfConfidenceAtLeast = options.stopIfConfidenceAtLeast;
+  const signal: AbortSignal | undefined = (options as any).signal;
+
+  const emitRaw = options.onEvent;
+  const emit = createSafeEmitter(emitRaw, {
+    awaitEvents,
+    snapshotStateForEvents,
+    logger,
+  });
 
   const state: ReasoningState = {
     iteration: 0,
-    maxIterations: options.maxIterations ?? 3, // Уменьшите до 3
+    maxIterations: options.maxIterations ?? 3,
 
     context: initialContext,
     knowledge: {},
@@ -25,108 +44,234 @@ export async function runReasoningLoop(
     done: false,
   };
 
-  console.log(`🚀 Начинаем reasoning loop с максимум ${state.maxIterations} итераций`);
+  logInfo(
+    logger,
+    `🚀 Начинаем reasoning loop с максимум ${state.maxIterations} итераций`
+  );
 
-  while (!state.done && state.iteration < state.maxIterations) {
-    state.iteration++;
-    
-    console.log(`\n📊 Итерация ${state.iteration}/${state.maxIterations}`);
-    console.log(`Найдено проблем: ${state.findings.length}`);
-    console.log(`Confidence: ${state.confidence}`);
+  try {
+    while (!state.done && state.iteration < state.maxIterations) {
+      throwIfAborted(signal);
 
-    // 1. Декомпозиция
-    console.log("1. Decompose...");
-    await runStep(ReasoningStep.DECOMPOSE, strategy.decompose);
-    
-    // 2. Генерация гипотез
-    console.log("2. Generate Hypotheses...");
-    await runStep(ReasoningStep.GENERATE_HYPOTHESES, strategy.generateHypotheses);
-    
-    // 3. Анализ
-    console.log("3. Analyze...");
-    await runStep(ReasoningStep.ANALYZE, strategy.analyze);
+      state.iteration++;
 
-    // 4. Рефлексия
-    console.log("4. Reflect...");
-    emit?.({
-      type: "step:start",
-      step: ReasoningStep.REFLECT,
-      state,
-    });
+      logInfo(
+        logger,
+        `\n📊 Итерация ${state.iteration}/${state.maxIterations}`
+      );
+      logDebug(logger, `Найдено проблем: ${state.findings.length}`);
+      logDebug(logger, `Confidence: ${state.confidence}`);
 
-    const reflection = await strategy.reflect(state);
+      await runStep<void>(ReasoningStep.DECOMPOSE, strategy.decompose);
 
-    // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: НЕ МЕНЯЕМ ОБЛАСТИ ПОСЛЕ РЕФЛЕКСИИ!
-    // Просто сохраняем результат, но не меняем state.knowledge.areas
-    // Это предотвращает бесконечные циклы
+      await runStep<void>(
+        ReasoningStep.GENERATE_HYPOTHESES,
+        strategy.generateHypotheses
+      );
 
-    emit?.({
-      type: "reflection",
-      step: ReasoningStep.REFLECT,
-      state,
-      result: reflection,
-    });
+      await runStep<void>(ReasoningStep.ANALYZE, strategy.analyze);
 
-    emit?.({
-      type: "step:end",
-      step: ReasoningStep.REFLECT,
-      state,
-    });
+      const reflection = await runStep<any>(
+        ReasoningStep.REFLECT,
+        strategy.reflect
+      );
+      await emit?.({
+        type: "reflection",
+        step: ReasoningStep.REFLECT,
+        state,
+        result: reflection,
+      });
+      if (reflection && typeof reflection.reason === "string") {
+        (state as any).lastReflection = reflection.reason;
+      }
 
-    state.lastReflection = reflection.reason;
+      const critique = await runStep<any>(
+        ReasoningStep.CRITIQUE,
+        strategy.critique
+      );
+      await emit?.({
+        type: "critique",
+        step: ReasoningStep.CRITIQUE,
+        state,
+        result: critique,
+      });
+      if (critique && typeof critique.confidence === "number") {
+        state.confidence = critique.confidence;
+      }
 
-    // 5. Критика (ВСЕГДА выполняем после рефлексии)
-    console.log("5. Critique...");
-    emit?.({
-      type: "step:start",
-      step: ReasoningStep.CRITIQUE,
-      state,
-    });
+      let shouldStop = false;
+      try {
+        shouldStop = !!strategy.shouldStop(state);
+      } catch (e) {
+        logWarn(
+          logger,
+          "⚠️ strategy.shouldStop выбросил ошибку, продолжаем по запасной логике",
+          e
+        );
+      }
+      if (
+        !shouldStop &&
+        typeof stopIfConfidenceAtLeast === "number" &&
+        typeof state.confidence === "number"
+      ) {
+        shouldStop = state.confidence >= stopIfConfidenceAtLeast;
+      }
 
-    const critique = await strategy.critique(state);
+      if (shouldStop) {
+        logInfo(
+          logger,
+          `✅ Остановка по условию стратегии${
+            typeof stopIfConfidenceAtLeast === "number"
+              ? ` или порогу ${stopIfConfidenceAtLeast}`
+              : ""
+          }`
+        );
+        state.done = true;
+        await emit?.({ type: "stop", state });
+        break;
+      }
 
-    emit?.({
-      type: "critique",
-      step: ReasoningStep.CRITIQUE,
-      state,
-      result: critique,
-    });
-
-    emit?.({
-      type: "step:end",
-      step: ReasoningStep.CRITIQUE,
-      state,
-    });
-
-    state.confidence = critique.confidence;
-
-    // 6. Проверка остановки
-    if (strategy.shouldStop(state)) {
-      console.log(`✅ Остановка по условию: confidence=${state.confidence} >= 0.75`);
-      state.done = true;
-      emit?.({ type: "stop", state });
-      break;
+      if (state.iteration >= state.maxIterations) {
+        logInfo(
+          logger,
+          `🛑 Достигнут максимум итераций: ${state.maxIterations}`
+        );
+        state.done = true;
+        await emit?.({ type: "max_iterations_reached", state });
+        break;
+      }
     }
-
-    // 7. Проверка максимального числа итераций
-    if (state.iteration >= state.maxIterations) {
-      console.log(`🛑 Достигнут максимум итераций: ${state.maxIterations}`);
-      state.done = true;
-      emit?.({ type: "max_iterations_reached", state });
-      break;
-    }
+  } catch (err) {
+    logError(logger, "❌ Ошибка в reasoning loop:", err);
+    state.done = true;
+    await emit?.({
+      type: "error",
+      state,
+      error: serializeError(err),
+    });
   }
 
-  console.log(`\n🏁 Reasoning loop завершен. Итераций: ${state.iteration}, Проблем: ${state.findings.length}`);
-  
+  logInfo(
+    logger,
+    `\n🏁 Reasoning loop завершен. Итераций: ${state.iteration}, Проблем: ${state.findings.length}`
+  );
+  await emit?.({ type: "completed", state });
   return state;
 
-  async function runStep(
+  async function runStep<T>(
     step: ReasoningStep,
-    fn: (state: ReasoningState) => Promise<void>
-  ) {
-    emit?.({ type: "step:start", step, state });
-    await fn.call(strategy, state);
-    emit?.({ type: "step:end", step, state });
+    fn: (state: ReasoningState) => Promise<T>
+  ): Promise<T> {
+    const stepName = String(step);
+    const startedAt = Date.now();
+
+    await emit?.({ type: "step:start", step, state });
+
+    try {
+      throwIfAborted(signal);
+      const resultPromise = fn.call(strategy, state);
+      const result = await withTimeout(resultPromise, stepTimeoutMs, stepName);
+
+      const durationMs = Date.now() - startedAt;
+      await emit?.({ type: "step:result", step, state, result, durationMs });
+      await emit?.({ type: "step:end", step, state, durationMs });
+      logDebug(logger, `✅ ${stepName} ok (${durationMs}ms)`);
+      return result;
+    } catch (err) {
+      const durationMs = Date.now() - startedAt;
+      const errorPayload = serializeError(err);
+      await emit?.({
+        type: "step:error",
+        step,
+        state,
+        error: errorPayload,
+        durationMs,
+      });
+      logError(logger, `💥 Ошибка на шаге ${stepName} (${durationMs}ms):`, err);
+      throw err;
+    }
   }
+}
+
+function withTimeout<T>(p: Promise<T>, ms?: number, name?: string): Promise<T> {
+  if (!ms || ms <= 0) return p;
+  let t: any;
+  const timeout = new Promise<never>((_, rej) => {
+    t = setTimeout(
+      () => rej(new Error(`Step "${name ?? "unknown"}" timeout after ${ms}ms`)),
+      ms
+    );
+  });
+  return Promise.race([p.finally(() => clearTimeout(t)), timeout]);
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    const reason = (signal as any).reason ?? "aborted";
+    throw new Error(`Aborted: ${String(reason)}`);
+  }
+}
+
+function createSafeEmitter(
+  raw: RunReasoningOptions["onEvent"],
+  opts: {
+    awaitEvents: boolean;
+    snapshotStateForEvents: boolean;
+    logger: Logger;
+  }
+) {
+  if (!raw) return undefined;
+  return async (event: any) => {
+    try {
+      const e = { ...event };
+      if (opts.snapshotStateForEvents && e.state) {
+        e.state = safeClone(e.state);
+      }
+      const res = raw(e);
+      if (
+        opts.awaitEvents &&
+        res &&
+        typeof (res as Promise<any>).then === "function"
+      ) {
+        await res;
+      }
+    } catch (e) {
+      logWarn(
+        opts.logger,
+        "⚠️ onEvent обработчик выбросил ошибку, продолжаем:",
+        e
+      );
+    }
+  };
+}
+
+function safeClone<T>(obj: T): T {
+  try {
+    if (typeof structuredClone === "function") return structuredClone(obj);
+  } catch {}
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch {
+    return obj;
+  }
+}
+
+function serializeError(err: unknown) {
+  if (err instanceof Error) {
+    return { name: err.name, message: err.message, stack: err.stack };
+  }
+  return { message: String(err) };
+}
+
+function logDebug(logger: Logger, ...args: any[]) {
+  logger.debug?.(...args);
+}
+function logInfo(logger: Logger, ...args: any[]) {
+  (logger.info ?? console.log)(...args);
+}
+function logWarn(logger: Logger, ...args: any[]) {
+  (logger.warn ?? console.warn)(...args);
+}
+function logError(logger: Logger, ...args: any[]) {
+  (logger.error ?? console.error)(...args);
 }

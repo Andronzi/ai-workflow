@@ -1,27 +1,51 @@
 // run.ts
+import pino from "pino";
 import { runReasoningLoop } from "../../../packages/common/src/reasoning/abstract-engine.js";
 import { ReasoningEvent } from "../../../packages/common/src/reasoning/event-types.ts";
 import { CodeReviewStrategy } from "./strategy.ts";
 
+const logger = pino({ level: "info" });
+
 export async function runCodeReview({
   diff,
   context,
-  logger,
 }: {
   diff: string;
   context: any;
-  logger: Function;
 }) {
-  return runReasoningLoop(
+  const ac = new AbortController();
+  const globalTimeout = setTimeout(() => ac.abort("global-timeout"), 30_000);
+
+  const result = await runReasoningLoop(
     CodeReviewStrategy,
     { diff, context },
     {
       maxIterations: 5,
+      logger: {
+        debug: (...a) => logger.debug(a),
+        info: (...a) => logger.info(a),
+        warn: (...a) => logger.warn(a),
+        error: (...a) => logger.error(a),
+      },
+      stepTimeoutMs: 10_000,
+      stopIfConfidenceAtLeast: 0.82,
+      snapshotStateForEvents: true,
+      awaitEvents: true,
       onEvent: (params: ReasoningEvent) => {
-        logger(
-          `[Reasoning][Iter ${params.state?.iteration || 0}][${params.step || "unknown"}] ${params.type || ""}`
+        logger.info(
+          `[Reasoning][Iter ${params.state?.iteration || 0}][${
+            params.step || "unknown"
+          }]`
         );
       },
     }
-  );
+  ).finally(() => clearTimeout(globalTimeout));
+
+  console.log("Final state:", {
+    iteration: result.iteration,
+    confidence: result.confidence,
+    done: result.done,
+  });
+
+  return result;
 }

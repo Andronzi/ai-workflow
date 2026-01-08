@@ -6,22 +6,20 @@ export enum ReasoningStep {
   ANALYZE = "analyze",
   REFLECT = "reflect",
   CRITIQUE = "critique",
+  STOP = "stop",
 }
 
 export interface StepStartEvent {
-  type: "step:start";
   step: ReasoningStep;
   state: ReasoningState;
 }
 
 export interface StepEndEvent {
-  type: "step:end";
   step: ReasoningStep;
   state: ReasoningState;
 }
 
 export interface ReflectionEvent {
-  type: "reflection";
   step: ReasoningStep.REFLECT;
   state: ReasoningState;
   result: {
@@ -32,7 +30,6 @@ export interface ReflectionEvent {
 }
 
 export interface CritiqueEvent {
-  type: "critique";
   step: ReasoningStep.CRITIQUE;
   state: ReasoningState;
   result: {
@@ -42,7 +39,8 @@ export interface CritiqueEvent {
 }
 
 export interface StopEvent {
-  type: "stop";
+  step: ReasoningStep.STOP;
+  type: "stop" | "max_iterations_reached";
   state: ReasoningState;
 }
 
