@@ -11,9 +11,6 @@ const MAX_HYPOTHESES_PER_AREA = 4;
 const MAX_TOTAL_CHECKS = 12;
 
 export const CodeReviewStrategy: AgentReasoningStrategy = {
-  /**
-   * STEP 1: Decompose + Intent inference
-   */
   async decompose(state) {
     const diff = state.context.diff;
     const context: CodeReviewContext = state.context.context || {};
@@ -26,10 +23,9 @@ export const CodeReviewStrategy: AgentReasoningStrategy = {
     });
 
     const system = `
-Ты senior code reviewer.
+You are a senior code reviewer analyzing code changes.
 
-Ты ОБЯЗАН вернуть JSON строго следующего вида:
-
+CRITICAL: You MUST return ONLY a JSON object with this EXACT structure:
 {
   "files": string[],
   "domain": string,
@@ -37,37 +33,39 @@ export const CodeReviewStrategy: AgentReasoningStrategy = {
   "areas": string[]
 }
 
-НЕ добавляй других полей. НЕ добавляй комментарии.
+DO NOT add any other fields.
+DO NOT include any text before or after the JSON.
+DO NOT wrap the JSON in markdown.
 `.trim();
 
     const user = `
-Проанализируй diff и заполни ВСЕ поля JSON.
+Analyze this code diff and return the JSON with all fields filled.
 
-Рассмотри следующие универсальные аспекты code review и выбери 4–6 наиболее релевантных для данного кода:
-- security (уязвимости, инъекции, утечки)
-- error handling & robustness (обработка ошибок, fallback'и)
-- performance (оптимизация, лишние вычисления)
-- code style & readability (нейминг, форматирование, магические строки, инлайн-стили)
-- architecture & separation of concerns (разделение ответственности, слишком большие функции/модули)
-- maintainability (DRY, повторяющийся код, сложность поддержки)
-- type safety (отсутствие типов, слабая типизация)
-- best practices (современные паттерны vs устаревшие)
-- input validation (валидация ввода)
+Consider these universal code review aspects and select 4–6 most relevant:
+- security (vulnerabilities, injections, leaks)
+- error handling & robustness
+- performance (optimization, unnecessary computations)
+- code style & readability (naming, formatting, magic strings)
+- architecture & separation of concerns
+- maintainability (DRY, complexity, duplication)
+- type safety
+- best practices
+- input validation
 - logging & debugging
 
-Diff:
+Code diff:
 ${diff}
 
-Pull Request title:
-${context.pullRequest?.title ?? "N/A"}
+Pull Request title: ${context.pullRequest?.title ?? "N/A"}
 
-Примеры ответа:
+Example responses:
 {
   "files": ["UserDashboard.tsx"],
   "domain": "frontend",
   "riskLevel": "medium",
   "areas": ["code style & readability", "architecture & separation of concerns", "maintainability", "error handling & robustness", "type safety"]
 }
+
 {
   "files": ["auth.service.ts"],
   "domain": "backend",
@@ -76,7 +74,7 @@ ${context.pullRequest?.title ?? "N/A"}
 }
 `.trim();
 
-    logLLMRequest(system, user, Schema);
+    logLLMRequest(system, user);
 
     const result = await callLLMWithRetry(system, user, Schema, 400);
 
@@ -86,13 +84,12 @@ ${context.pullRequest?.title ?? "N/A"}
     state.knowledge.areas = result.areas;
 
     console.log(
-      `✅ Decompose: domain=${result.domain}, risk=${result.riskLevel}, areas=${result.areas.join(", ")}`
+      `✅ Decompose: domain=${result.domain}, risk=${
+        result.riskLevel
+      }, areas=${result.areas.join(", ")}`
     );
   },
 
-  /**
-   * STEP 2: Generate hypotheses
-   */
   async generateHypotheses(state) {
     const diff = state.context.diff;
 
@@ -101,26 +98,34 @@ ${context.pullRequest?.title ?? "N/A"}
     });
 
     const systemExpect = `
-Ты опытный software architect.
-На основе домена и изменений выведи 6–8 НЕЯВНЫХ требований и лучших практик, которые должны соблюдаться в таком коде.
-Будь конкретен и учитывай стек технологий.
-Отвечай строго JSON: { "expectations": string[] }
+You are an experienced software architect.
+Based on the domain and code changes, infer 6–8 implicit requirements and best practices.
+
+IMPORTANT: Return ONLY JSON: { "expectations": string[] }
+
+Each expectation should be specific and consider the technology stack.
 `.trim();
 
     const userExpect = `
-Домен: ${state.knowledge.domain}
-Уровень риска: ${state.knowledge.riskLevel}
+Domain: ${state.knowledge.domain}
+Risk Level: ${state.knowledge.riskLevel}
 
-Изменения:
+Code changes:
 ${diff}
 `.trim();
 
-    logLLMRequest(systemExpect, userExpect, ExpectationsSchema);
-    const expectationsResult = await callLLMWithRetry(systemExpect, userExpect, ExpectationsSchema, 350);
+    const expectationsResult = await callLLMWithRetry(
+      systemExpect,
+      userExpect,
+      ExpectationsSchema,
+      350
+    );
 
     state.knowledge.expectations = expectationsResult.expectations;
 
-    console.log(`🧠 Inferred ${expectationsResult.expectations.length} implicit expectations`);
+    console.log(
+      `🧠 Inferred ${expectationsResult.expectations.length} implicit expectations`
+    );
 
     const HypothesesSchema = z.object({
       hypotheses: z.array(z.string().min(1)),
@@ -128,65 +133,58 @@ ${diff}
 
     const hypothesesByArea: Record<string, string[]> = {};
 
-    // Приоритет: suggestedFocus из reflect, затем areas
-    const areasToAnalyze = state.knowledge.suggestedFocus?.length > 0
-      ? state.knowledge.suggestedFocus
-      : state.knowledge.areas ?? [];
+    const areasToAnalyze =
+      state.knowledge.suggestedFocus?.length > 0
+        ? state.knowledge.suggestedFocus
+        : state.knowledge.areas ?? [];
 
     for (const area of areasToAnalyze) {
       const systemHyp = `
-ТЫ — ЭКСПЕРТ ПО "${area.toUpperCase()}".
-ТВОЯ ЗАДАЧА — ПРИДУМАТЬ ВОЗМОЖНЫЕ ПРОБЛЕМЫ В КОДЕ.
+You are an expert in "${area.toUpperCase()}".
 
-ОТВЕЧАЙ ИСКЛЮЧИТЕЛЬНО МАССИВОМ СТРОК.
-ФОРМАТ ДОЛЖЕН БЫТЬ ТОЧНО ТАКИМ:
+CRITICAL INSTRUCTIONS:
+1. You MUST return ONLY a JSON object
+2. The JSON must have EXACTLY this structure:
+   {
+     "hypotheses": ["hypothesis 1", "hypothesis 2", "hypothesis 3"]
+   }
+3. Each hypothesis should be a short, specific potential problem
+4. Return 3–5 hypotheses
+5. NO additional text, NO explanations, NO markdown
+
+Example of CORRECT response:
 {
   "hypotheses": [
-    "Короткое конкретное описание потенциальной проблемы 1",
-    "Короткое конкретное описание потенциальной проблемы 2",
-    "Короткое конкретное описание потенциальной проблемы 3"
-  ]
-}
-
-ПРАВИЛА:
-- hypotheses — ТОЛЬКО массив СТРОК
-- Каждая строка — короткая, конкретная гипотеза о возможной проблеме
-- НИКАКИХ объектов, confirmed, severity, file, line
-- НЕ пиши текст до или после JSON
-- Верни 3–5 гипотез
-
-ПРИМЕР ПОЛНОГО ПРАВИЛЬНОГО ОТВЕТА:
-{
-  "hypotheses": [
-    "Отсутствует проверка на наличие обязательной переменной окружения",
-    "Ошибка возвращает стек трейс клиенту",
-    "Повторяющийся код загрузки данных можно вынести в отдельную функцию",
-    "Используются магические строки вместо констант",
-    "Функция слишком большая и выполняет несколько задач"
+    "Missing validation for required environment variable",
+    "Error returns stack trace to client",
+    "Repeated data loading code could be extracted into function",
+    "Using magic strings instead of constants",
+    "Function is too large and handles multiple responsibilities"
   ]
 }
 `.trim();
 
       const userHyp = `
-Домен: ${state.knowledge.domain}
-Уровень риска: ${state.knowledge.riskLevel}
-Область анализа: ${area}
+Domain: ${state.knowledge.domain}
+Risk Level: ${state.knowledge.riskLevel}
+Analysis Area: ${area}
 
-Неявные требования и лучшие практики:
+Implicit Requirements:
 ${state.knowledge.expectations.join("\n")}
 
-Изменённый код (diff):
+Code diff:
 ${diff}
 
-Сформулируй 3–5 наиболее вероятных проблем именно в области "${area}".
-Будь конкретен.
-Верни ТОЛЬКО JSON с массивом строк.
+Generate 3–5 specific potential problems in the area of "${area}".
 `.trim();
 
-      logLLMRequest(systemHyp, userHyp, HypothesesSchema);
-
       try {
-        const result = await callLLMWithRetry(systemHyp, userHyp, HypothesesSchema, 500);
+        const result = await callLLMWithRetry(
+          systemHyp,
+          userHyp,
+          HypothesesSchema,
+          500
+        );
 
         const cleaned = (result.hypotheses || [])
           .filter((h: any) => typeof h === "string" && h.trim().length > 12)
@@ -196,19 +194,18 @@ ${diff}
 
         console.log(`✅ Hypotheses for "${area}": ${cleaned.length}`);
       } catch (err) {
-        console.error(`Ошибка генерации гипотез для ${area}:`, err);
+        console.error(`Error generating hypotheses for ${area}:`, err);
         hypothesesByArea[area] = [];
       }
     }
 
     state.knowledge.hypotheses = hypothesesByArea;
 
-    console.log(`🧠 Total hypotheses: ${Object.values(hypothesesByArea).flat().length}`);
+    console.log(
+      `🧠 Total hypotheses: ${Object.values(hypothesesByArea).flat().length}`
+    );
   },
 
-  /**
-   * STEP 3: Analyze
-   */
   async analyze(state) {
     const diff = state.context.diff;
 
@@ -222,12 +219,17 @@ ${diff}
     });
 
     let totalChecks = 0;
-    const allHypotheses = Object.values(state.knowledge.hypotheses ?? {}).flat();
+    const allHypotheses = Object.values(
+      state.knowledge.hypotheses ?? {}
+    ).flat();
 
-    // Shuffle
+    // Shuffle hypotheses
     for (let i = allHypotheses.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [allHypotheses[i], allHypotheses[j]] = [allHypotheses[j], allHypotheses[i]];
+      [allHypotheses[i], allHypotheses[j]] = [
+        allHypotheses[j],
+        allHypotheses[i],
+      ];
     }
 
     for (const hypothesis of allHypotheses) {
@@ -235,65 +237,71 @@ ${diff}
       totalChecks++;
 
       const system = `
-ТЫ — СТРОГИЙ И ОПЫТНЫЙ CODE REVIEWER.
-ТЕБЕ ДАНА РОВНО ОДНА ГИПОТЕЗА О ВОЗМОЖНОЙ ПРОБЛЕМЕ.
-ТЫ ДОЛЖЕН ПРОВЕРИТЬ, ПОДТВЕРЖДАЕТСЯ ЛИ ОНА В КОДЕ.
+You are a strict and experienced code reviewer.
+You are given ONE hypothesis about a potential problem.
+Check if it's confirmed in the code.
 
-ОТВЕЧАЙ ИСКЛЮЧИТЕЛЬНО ОДНИМ JSON-ОБЪЕКТОМ СТРОГО ПО ФОРМАТУ:
-
+CRITICAL: Return ONLY ONE JSON object with this EXACT structure:
 {
-  "confirmed": true или false,
-  "file": "filename" (опционально, только если точно знаешь),
-  "line": number (опционально),
+  "confirmed": boolean,
+  "file": "filename" (optional, only if you know exactly),
+  "line": number (optional),
   "severity": "low" | "medium" | "high",
-  "description": "подробное объяснение — проблема есть или её нет",
-  "suggestion": "конкретное предложение по улучшению или 'всё в порядке'"
+  "description": "detailed explanation",
+  "suggestion": "specific improvement suggestion"
 }
 
-ПРАВИЛА:
-- Если проблема НЕ подтверждена → confirmed: false, severity: "low"
-- Если подтверждена → confirmed: true и реальная severity
-- НИКОГДА не возвращай массив
-- НИКОГДА не оборачивай в "hypotheses"
-- НИКОГДА не пиши текст вне JSON
+RULES:
+- If problem NOT confirmed → confirmed: false, severity: "low"
+- If confirmed → confirmed: true with appropriate severity
+- NEVER return an array
+- NEVER wrap in "hypotheses" or other nesting
+- NEVER add text outside JSON
 
-ПРИМЕРЫ:
+Examples:
 {
   "confirmed": true,
   "file": "auth.ts",
   "line": 12,
   "severity": "high",
-  "description": "Переменная окружения используется без проверки на наличие",
-  "suggestion": "Добавить проверку и выброс ошибки при отсутствии"
+  "description": "Environment variable used without existence check",
+  "suggestion": "Add validation and throw error if missing"
 }
+
 {
   "confirmed": false,
   "severity": "low",
-  "description": "Пароли хэшируются перед сохранением",
-  "suggestion": "Нет действий требуется"
+  "description": "Passwords are hashed before storage",
+  "suggestion": "No action required"
 }
 `.trim();
 
       const user = `
-Гипотеза:
+Hypothesis:
 "${hypothesis}"
 
-Код (diff):
+Code diff:
 ${diff}
 
-Проверь, подтверждается ли гипотеза.
-Верни ТОЛЬКО один JSON-объект.
+Check if this hypothesis is confirmed.
+Return ONLY the JSON object.
 `.trim();
 
-      logLLMRequest(system, user, AnalysisSchema);
-
       try {
-        const result = await callLLMWithRetry(system, user, AnalysisSchema, 700);
+        const result = await callLLMWithRetry(
+          system,
+          user,
+          AnalysisSchema,
+          700
+        );
 
         if (result.confirmed) {
-          const duplicate = state.findings.some((f: any) =>
-            f.hypothesis === hypothesis ||
-            f.description.toLowerCase().includes(result.description.toLowerCase().substring(0, 60))
+          const duplicate = state.findings.some(
+            (f: any) =>
+              f.hypothesis === hypothesis ||
+              f.description
+                .toLowerCase()
+                .includes(result.description.toLowerCase().substring(0, 60))
           );
 
           if (!duplicate) {
@@ -306,26 +314,31 @@ ${diff}
               suggestion: result.suggestion,
               timestamp: new Date().toISOString(),
             });
-            console.log(`🚨 [${result.severity}] ${result.description.slice(0, 100)}...`);
+            console.log(
+              `🚨 [${result.severity}] ${result.description.slice(0, 100)}...`
+            );
           }
         }
       } catch (err: any) {
-        console.error(`Ошибка анализа: ${hypothesis.slice(0, 60)}...`, err.message);
+        console.error(
+          `Analysis error: ${hypothesis.slice(0, 60)}...`,
+          err.message
+        );
       }
     }
 
-    console.log(`📊 Анализ завершён: ${state.findings.length} уникальных проблем из ${totalChecks} проверок`);
+    console.log(
+      `📊 Analysis complete: ${state.findings.length} unique issues from ${totalChecks} checks`
+    );
   },
 
-  /**
-   * STEP 4: Reflect — с эволюцией
-   */
   async reflect(state) {
     const findingsCount = state.findings.length;
     const hasCritical = state.findings.some((f: any) => f.severity === "high");
     const weakAreas = state.weakAreas || [];
 
-    const issuesMissed = findingsCount < 4 && state.knowledge.riskLevel !== "low";
+    const issuesMissed =
+      findingsCount < 4 && state.knowledge.riskLevel !== "low";
 
     let suggestedFocus: string[] = [];
 
@@ -337,7 +350,7 @@ ${diff}
         "architecture & separation of concerns",
         "maintainability",
         "type safety",
-        "best practices"
+        "best practices",
       ];
     }
 
@@ -345,18 +358,16 @@ ${diff}
 
     return {
       issuesMissed,
-      reason: findingsCount > 0
-        ? hasCritical
-          ? "Найдены критические проблемы. Углубимся в слабые области."
-          : "Найдены проблемы. Расширим анализ на стиль, архитектуру и поддерживаемость."
-        : "Мало находок при ненулевом риске — фокус на стиль и архитектуру.",
+      reason:
+        findingsCount > 0
+          ? hasCritical
+            ? "Found critical issues. Deepening analysis into weak areas."
+            : "Found issues. Expanding analysis to style, architecture, and maintainability."
+          : "Few findings with non-low risk - focusing on style and architecture.",
       suggestedFocus,
     };
   },
 
-  /**
-   * STEP 5: Critique
-   */
   async critique(state) {
     const Schema = z.object({
       confidence: z.number().min(0).max(1),
@@ -364,10 +375,10 @@ ${diff}
     });
 
     const system = `
-Ты — строгий и объективный эксперт по code review.
-Оцени качество анализа по шкале 0.0–1.0.
+You are a strict and objective code review expert.
+Evaluate the analysis quality on a scale 0.0–1.0.
 
-ОТВЕТЬ ТОЛЬКО JSON:
+Return ONLY JSON:
 {
   "confidence": number,
   "weakAreas": string[]
@@ -376,60 +387,60 @@ ${diff}
 
     const uniqueAreas = new Set(
       state.findings.map((f: any) => {
-        return Object.keys(state.knowledge.hypotheses || {}).find(a =>
-          f.hypothesis.toLowerCase().includes(a.toLowerCase())
-        ) || "general";
+        return (
+          Object.keys(state.knowledge.hypotheses || {}).find((a) =>
+            f.hypothesis.toLowerCase().includes(a.toLowerCase())
+          ) || "general"
+        );
       })
     );
 
     const user = `
-Оцени анализ:
+Evaluate this analysis:
 
-- Найдено проблем: ${state.findings.length}
-- Критических: ${state.findings.filter((f: any) => f.severity === "high").length}
-- Покрыто уникальных областей: ${uniqueAreas.size}
-- Итерация: ${state.iteration}
+- Issues found: ${state.findings.length}
+- Critical issues: ${
+      state.findings.filter((f: any) => f.severity === "high").length
+    }
+- Unique areas covered: ${uniqueAreas.size}
+- Iteration: ${state.iteration}
 
-Если анализ охватывает:
-- code style & readability
-- architecture & separation of concerns
-- maintainability
-- type safety
-- best practices
-→ confidence > 0.85
-
-Если только error handling и security → confidence < 0.7
-
-Если есть прогресс по итерациям и разнообразие — повышай confidence.
+Scoring guidelines:
+- If analysis covers: code style, architecture, maintainability, type safety, best practices → confidence > 0.85
+- If only error handling and security → confidence < 0.7
+- If there's progress across iterations and diversity → increase confidence
 `.trim();
-
-    logLLMRequest(system, user, Schema);
 
     try {
       const result = await callLLMWithRetry(system, user, Schema, 300);
       state.confidence = result.confidence;
       state.weakAreas = result.weakAreas;
 
-      console.log(`📊 Critique: confidence=${result.confidence.toFixed(2)}, weak: ${result.weakAreas.join(", ") || "none"}`);
+      console.log(
+        `📊 Critique: confidence=${result.confidence.toFixed(2)}, weak areas: ${
+          result.weakAreas.join(", ") || "none"
+        }`
+      );
       return result;
     } catch (err) {
-      console.error("Critique failed → defaults");
+      console.error("Critique failed → using defaults");
       state.confidence = 0.6;
-      state.weakAreas = ["code style & readability", "architecture & separation of concerns"];
+      state.weakAreas = [
+        "code style & readability",
+        "architecture & separation of concerns",
+      ];
       return { confidence: 0.6, weakAreas: state.weakAreas };
     }
   },
 
-  /**
-   * STEP 6: Stop condition с previousConfidence
-   */
   shouldStop(state) {
     if (state.confidence === null) return false;
 
     const hasCritical = state.findings.some((f: any) => f.severity === "high");
     const riskHigh = state.knowledge.riskLevel === "high";
 
-    if (state.previousConfidence &&
+    if (
+      state.previousConfidence &&
       state.confidence <= state.previousConfidence + 0.04
     ) {
       if (state.iteration >= 3) return true;
