@@ -10,6 +10,8 @@ export interface ReasoningState {
   findings: any[];
 
   confidence: number | null;
+  previousConfidence: number | null;
+  weakAreas: string[];
   lastReflection?: string;
 
   done: boolean;
@@ -39,7 +41,6 @@ export interface RunReasoningOptions {
   maxIterations?: number;
   logger: Logger;
   stepTimeoutMs: number;
-  stopIfConfidenceAtLeast: number;
   snapshotStateForEvents?: boolean;
   awaitEvents?: boolean;
   signal?: AbortController;

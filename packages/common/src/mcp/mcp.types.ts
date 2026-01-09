@@ -10,20 +10,7 @@ export const CodeReviewContextSchema = z.object({
   }).optional(),
   files: z.object(z.object({
     language: z.string(),
-    purpose: z.string().optional(),
-    securityLevel: z.enum(["low", "medium", "high"]).optional(),
-    previousReviewComments: z.array(z.object({
-      id: z.number(),
-      comment: z.string(),
-      status: z.enum(["open", "fixed", "wontfix", "pending"])
-    })).optional()
   })).optional(),
-  requirements: z.object({
-    must: z.array(z.string()).optional(),
-    should: z.array(z.string()).optional(),
-    mustNot: z.array(z.string()).optional()
-  }).optional(),
-  relatedFiles: z.array(z.string()).optional()
 });
 
 export const MCPMessageSchema = z.object({

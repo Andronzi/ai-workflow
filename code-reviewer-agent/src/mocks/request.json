@@ -14,39 +14,9 @@
       },
       "files": {
         "auth.ts": {
-          "language": "typescript",
-          "purpose": "Authentication logic",
-          "securityLevel": "high",
-          "previousReviewComments": [
-            {
-              "id": 1,
-              "comment": "Avoid storing plain text passwords",
-              "status": "fixed"
-            }
-          ]
+          "language": "typescript"
         }
-      },
-      "requirements": {
-        "must": [
-          "Use bcrypt for password hashing",
-          "Implement JWT tokens",
-          "Add input validation",
-          "Return proper HTTP status codes"
-        ],
-        "should": [
-          "Add rate limiting",
-          "Implement refresh tokens"
-        ],
-        "mustNot": [
-          "Log sensitive data",
-          "Store passwords in plain text"
-        ]
-      },
-      "relatedFiles": [
-        "models/User.ts",
-        "middleware/authMiddleware.ts",
-        "config/db.ts"
-      ]
+      }
     }
   },
   "traceId": "pr-123-review-001",

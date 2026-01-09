@@ -57,7 +57,6 @@ app.post("/mcp", async (req: Request, res: Response) => {
       confidence: result.confidence || 0,
     });
 
-    // Форматируем ответ
     const response = {
       agent: "code-reviewer",
       status: "success",

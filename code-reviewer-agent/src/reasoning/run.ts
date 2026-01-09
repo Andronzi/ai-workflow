@@ -27,8 +27,7 @@ export async function runCodeReview({
         warn: (...a) => logger.warn(a),
         error: (...a) => logger.error(a),
       },
-      stepTimeoutMs: 10_000,
-      stopIfConfidenceAtLeast: 0.82,
+      stepTimeoutMs: 90_000,
       snapshotStateForEvents: true,
       awaitEvents: true,
       onEvent: (params: ReasoningEvent) => {
