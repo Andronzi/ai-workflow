@@ -1,0 +1,541 @@
+{
+  "name": "My workflow copy",
+  "nodes": [
+    {
+      "parameters": {
+        "owner": {
+          "__rl": true,
+          "value": "https://github.com/Andronzi",
+          "mode": "url"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "test-n8n-1",
+          "mode": "list",
+          "cachedResultName": "test-n8n-1",
+          "cachedResultUrl": "https://github.com/Andronzi/test-n8n-1"
+        },
+        "events": [
+          "pull_request",
+          "push"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        80
+      ],
+      "id": "9499e77d-16a5-4ef9-9b75-271a1d70389f",
+      "name": "Github Trigger",
+      "webhookId": "12d7ca32-29ea-4734-a4e3-88d0f45cf48f",
+      "credentials": {
+        "githubApi": {
+          "id": "ablzpPBl9SHXagNJ",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pushData = $input.first().json;\n\n// Пример compareUrl: https://github.com/Andronzi/test-n8n-1/compare/add220efd809...2b8c50eef378\nconst compareUrl = pushData.compareUrl;\n\n// Извлекаем SHAs из URL\nconst matches = compareUrl.match(/compare\\/(.+?)\\.\\.\\.(.+)$/);\nconst baseSha = matches ? matches[1] : pushData.commits[0].id + '^'; // fallback\nconst headSha = matches ? matches[2] : pushData.commits[0].id;\n\nreturn {\n  ...pushData,\n  baseSha: baseSha,\n  headSha: headSha,\n  // Формируем API URL для получения diff\n  apiDiffUrl: `https://api.github.com/repos/${pushData.repository}/compare/${baseSha}...${headSha}`\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        80
+      ],
+      "id": "470e70da-8f0e-425a-ad50-57b97710a13c",
+      "name": "Parse Diff URL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData = $input.first().json.body;\nconst headers = $input.first().json.headers;\n\nconsole.log('LOG:HEADERS', headers)\n\nconst eventType = headers['x-github-event'];\n\nif (eventType === 'pull_request') {\n  const pr = webhookData.pull_request;\n  \n  return {\n    event: 'pull_request',\n    action: webhookData.action, // opened, synchronize, closed\n    diffUrl: pr.diff_url, // URL для получения diff\n    repository: webhookData.repository.full_name,\n    pullRequest: {\n      id: pr.number,\n      title: pr.title,\n      author: pr.user.login,\n      url: pr.html_url,\n      branch: pr.head.ref,\n      baseBranch: pr.base.ref\n    },\n    raw: webhookData\n  };\n}\n\nif (eventType === 'push') {\n  return {\n    event: 'push',\n    repository: webhookData.repository.full_name,\n    branch: webhookData.ref.replace('refs/heads/', ''),\n    commitUrl: webhookData.head_commit.url,\n    compareUrl: webhookData.compare,\n    commits: webhookData.commits\n  };\n}\n\nreturn { \n  event: 'unknown',\n  message: 'Unsupported event type',\n  eventType \n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        80
+      ],
+      "id": "2966fef3-d533-4713-8707-fde1791d40cc",
+      "name": "Github data parser"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Parse Diff URL').item.json.apiDiffUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        512,
+        80
+      ],
+      "id": "9247aa2d-ed61-4a1f-becc-a48b93023f2d",
+      "name": "Request for diff",
+      "credentials": {
+        "githubApi": {
+          "id": "ablzpPBl9SHXagNJ",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pushContext = $input.first().json;\n\n// 1. Собираем diff из всех измененных файлов\nlet fullDiff = '';\n\nif (pushContext.files && pushContext.files.length > 0) {\n  for (const file of pushContext.files) {\n    if (file.patch) {\n      fullDiff += `diff --git a/${file.filename} b/${file.filename}\\n`;\n      fullDiff += `index ${file.sha.substring(0, 7)}..${file.sha.substring(0, 7)} 100644\\n`;\n      fullDiff += `--- a/${file.filename}\\n`;\n      fullDiff += `+++ b/${file.filename}\\n`;\n      fullDiff += file.patch + '\\n\\n';\n    }\n  }\n} else {\n  fullDiff = 'No changes (binary files or empty commit)';\n}\n\nconst context = {\n  repository: pushContext.repository,\n  branch: pushContext.branch,\n  eventType: 'push',\n  commit: {\n    id: pushContext.headSha,\n    message: pushContext.commits[0].message,\n    author: pushContext.commits[0].author.username,\n    url: pushContext.commitUrl,\n    stats: {\n      total: pushContext.total_commits || 1\n    }\n  },\n  files: pushContext.files ? pushContext.files.map(f => ({\n    filename: f.filename,\n    status: f.status,\n    additions: f.additions,\n    deletions: f.deletions,\n    changes: f.changes,\n    raw_url: f.raw_url\n  })) : []\n};\n\nconst mcpMessage = {\n  sender: 'n8n-code-reviewer',\n  target: 'code-reviewer-agent',\n  payload: {\n    diff: fullDiff, // Собранный diff из patch\n    context: context // Весь важный контекст\n  },\n  traceId: 'review_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),\n  timestamp: new Date().toISOString()\n};\n\nconsole.log('✅ Diff собран из', pushContext.files?.length || 0, 'файлов');\nconsole.log('📦 Контекст включает:', context.files.length, 'файлов с изменениями');\n\nreturn mcpMessage;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        80
+      ],
+      "id": "0f9fd063-06e0-4e07-b1c8-ab815e09cc29",
+      "name": "Make MCP message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://code-reviewer-agent:3002/mcp",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1184,
+        80
+      ],
+      "id": "d98b3668-307a-4e5e-8227-950ecf6cdb26",
+      "name": "Call Code-reviewer Agent",
+      "alwaysOutputData": true,
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bbcf78b4-450c-4d4b-aba6-644ea0bdae13"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        320
+      ],
+      "id": "9b66d334-a4c8-41ec-8153-c983c6dcc15b",
+      "name": "Data verification"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bbcf78b4-450c-4d4b-aba6-644ea0bdae13"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        336
+      ],
+      "id": "5d44b217-417a-43c9-8512-6bf146f65e0f",
+      "name": "Error Handling"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        336
+      ],
+      "id": "3350dc4d-cc85-4b63-ad68-d08b48f287a3",
+      "name": "Error Analysing"
+    },
+    {
+      "parameters": {
+        "chatId": "778818107",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1840,
+        336
+      ],
+      "id": "fbc39da3-081f-4ec3-9660-40a62ee0ba54",
+      "name": "Send a text message1",
+      "webhookId": "b7e09754-ffbb-414e-9ba9-fdfc972e8164",
+      "credentials": {
+        "telegramApi": {
+          "id": "8W4OYPzG3OPqC9Zj",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "serverTransport": "sse",
+        "endpointUrl": "http://project-manager-client:9091/api/v1/sse",
+        "tool": {
+          "__rl": true,
+          "value": "issue_operation",
+          "mode": "list",
+          "cachedResultName": "issue_operation"
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "issueId": "TA-1",
+            "request": "We are ready reviewing our code"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "issueId",
+              "displayName": "issueId",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        288
+      ],
+      "id": "033b8add-012b-438b-93d8-5f2bb776e514",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "serverTransport": "sse",
+        "endpointUrl": "http://documentation-agent-client:9095/api/v1/sse",
+        "tool": {
+          "__rl": true,
+          "value": "generate_image",
+          "mode": "list",
+          "cachedResultName": "generate_image"
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "issueId": "test-15",
+            "description": "public class HelloWorld { \tpublic static void main(String[] args) { \t\tSystem.out.println(\"Hello World!\"); \t} }"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "issueId",
+              "displayName": "issueId",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        544
+      ],
+      "id": "4943c83f-4352-493c-827a-6d49952d8663",
+      "name": "MCP Client1"
+    },
+    {
+      "parameters": {
+        "serverTransport": "sse",
+        "endpointUrl": "http://project-manager-client:9091/api/v1/sse",
+        "tool": {
+          "__rl": true,
+          "value": "issue_operation",
+          "mode": "list",
+          "cachedResultName": "issue_operation"
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "request": "change status to Test",
+            "issueId": "test-11"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "issueId",
+              "displayName": "issueId",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        832,
+        576
+      ],
+      "id": "5f119bf9-d4a5-44df-9494-4a80b1529b48",
+      "name": "Core MCP server"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -608,
+        448
+      ],
+      "id": "2d5926e4-70ae-4088-9d02-283473901967",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Настройки: можно поставить свой chat id здесь\nconst CHAT_ID = $json.chatId || 123456789; // <- Заменить на свой chat_id, или оставить, если он приходит в $json\n\nconst data = $input.first().json;\n\n// Безопасное чтение\nconst findings = data.review?.findings || [];\nconst summary = data.review?.summary || data.summary || '—';\nconst confidence = typeof data.review?.confidence !== 'undefined' ? data.review.confidence : data.confidence;\nconst iterations = data.review?.iterations ?? data.iterations ?? '—';\nconst durationMs = data.review?.durationMs ?? data.durationMs ?? 0;\nconst traceId = data.traceId || data.review?.traceId || '—';\n\n// Экранируем для HTML (Parse Mode = HTML)\nfunction escapeHtml(str) {\n  if (str === null || typeof str === 'undefined') return '';\n  return String(str)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nconst maxIssues = 5; // сколько показывать в сообщении\nlet text = '';\ntext += `<b>🧪 Code Review Report</b>\\n\\n`;\ntext += `<b>📊 Summary:</b> ${escapeHtml(summary)}\\n`;\nif (typeof confidence === 'number') text += `<b>🎯 Confidence:</b> ${(confidence * 100).toFixed(0)}% \\n`;\ntext += `<b>🔁 Iterations:</b> ${escapeHtml(iterations)}\\n`;\ntext += `<b>⏱ Duration:</b> ${(Number(durationMs) / 1000).toFixed(1)}s\\n`;\ntext += `<b>🆔 Trace:</b> <code>${escapeHtml(traceId)}</code>\\n\\n`;\n\ntext += `<b>📌 Issues (${findings.length}):</b>\\n`;\n\nconst shown = findings.slice(0, maxIssues);\nshown.forEach((issue, i) => {\n  const hypo = escapeHtml(issue.hypothesis || '—');\n  const file = escapeHtml(issue.file || '—');\n  const line = typeof issue.line !== 'undefined' ? escapeHtml(issue.line) : '—';\n  const severity = escapeHtml(issue.severity || '—');\n  const suggestion = escapeHtml(issue.suggestion || issue.description || '—');\n  const ts = escapeHtml(issue.timestamp || '');\n  text += `\\n<b>${i + 1}. ${hypo}</b>\\n`;\n  text += `<b>📄 File:</b> <code>${file}</code>  <b>📍 Line:</b> ${line}\\n`;\n  text += `<b>⚠️ Severity:</b> ${severity}\\n`;\n  text += `<b>💡 Suggestion:</b> ${suggestion}\\n`;\n  if (ts) text += `<i>${ts}</i>\\n`;\n});\n\nif (findings.length > maxIssues) {\n  text += `\\n…и ещё <b>${findings.length - maxIssues}</b> проблем(ы). Полный отчёт можно прикрепить как файл.\\n`;\n}\n\n// Защитный механизм: не отдаём слишком длинное сообщение (Telegram max ~4096 chars).\n// Если больше — отрежем текст и добавим пометку.\nconst MAX_TELEGRAM_LENGTH = 3800;\nif (text.length > MAX_TELEGRAM_LENGTH) {\n  text = text.slice(0, MAX_TELEGRAM_LENGTH - 200) + '\\n\\n<b>⚠️ Отчёт усечён (слишком длинный). Полный JSON прикреплён в файле.</b>';\n}\n\n// Возвращаем в формате, который легко использовать в Telegram node:\n// - $json.chatId\n// - $json.text\n// При желании можно также вернуть fullReport как строку (используется дальше для файла)\nreturn {\n  json: {\n    chatId: CHAT_ID,\n    text,\n    fullReport: JSON.stringify(data, null, 2) // если хочешь прикрепить как документ — см. ниже\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        336
+      ],
+      "id": "099c4c9c-4c44-4876-be20-1c6ecd3ea6ee",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Github Trigger": {
+      "main": [
+        [
+          {
+            "node": "Github data parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Diff URL": {
+      "main": [
+        [
+          {
+            "node": "Request for diff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Github data parser": {
+      "main": [
+        [
+          {
+            "node": "Parse Diff URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request for diff": {
+      "main": [
+        [
+          {
+            "node": "Make MCP message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make MCP message": {
+      "main": [
+        [
+          {
+            "node": "Call Code-reviewer Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Data verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data verification": {
+      "main": [
+        []
+      ]
+    },
+    "Call Code-reviewer Agent": {
+      "main": [
+        [
+          {
+            "node": "Error Handling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handling": {
+      "main": [
+        [
+          {
+            "node": "Error Analysing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Analysing": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "4740c5e9-7bd4-4ff7-8994-2a124e8cf7e4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c4c6270e22e4630ecb51536fe03face64854289027bd247e11d3b1c33c51149b"
+  },
+  "id": "TxhVCHotUUZCpsVD",
+  "tags": []
+}
