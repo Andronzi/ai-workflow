@@ -7,33 +7,26 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig*.json ./
 
-# Устанавливаем все зависимости (для сборки нужны devDeps)
+# Устанавливаем зависимости
 RUN npm ci
 
 # Копируем исходники
 COPY src ./src
 
-# Собираем TypeScript
+# Собираем TypeScript (common должен быть установлен через npm)
 RUN npm run build
 
 # 2️⃣ Stage: production
-FROM node:20 AS production
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Копируем только package.json + production зависимости
+# Копируем package.json
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Копируем только скомпилированный JS
+# Копируем скомпилированный код
 COPY --from=build /app/dist ./dist
 
-# Переменные окружения
-ENV NODE_ENV=production
-ENV PORT=3001
-
-# Порт
-EXPOSE 3001
-
-# Запуск
+EXPOSE 3002
 CMD ["node", "dist/index.js"]

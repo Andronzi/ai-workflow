@@ -1,8 +1,8 @@
 // run.ts
 import pino from "pino";
-import { runReasoningLoop } from "../../../packages/common/src/reasoning/abstract-engine.js";
-import { ReasoningEvent } from "../../../packages/common/src/reasoning/event-types.ts";
-import { CodeReviewStrategy } from "./strategy.ts";
+import { runReasoningLoop } from "../common/reasoning/abstract-engine.js";
+import { ReasoningEvent } from "../common/reasoning/event-types.js";
+import { CodeReviewStrategy } from "./strategy.js";
 
 const logger = pino({ level: "info" });
 
@@ -22,10 +22,10 @@ export async function runCodeReview({
     {
       maxIterations: 5,
       logger: {
-        debug: (...a) => logger.debug(a),
-        info: (...a) => logger.info(a),
-        warn: (...a) => logger.warn(a),
-        error: (...a) => logger.error(a),
+        debug: (...a: any[]) => logger.debug(a),
+        info: (...a: any[]) => logger.info(a),
+        warn: (...a: any[]) => logger.warn(a),
+        error: (...a: any[]) => logger.error(a),
       },
       stepTimeoutMs: 90_000,
       snapshotStateForEvents: true,

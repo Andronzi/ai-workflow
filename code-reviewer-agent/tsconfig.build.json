@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    "rootDirs": [
+      "./src",
+      "../../packages/common/src"
+    ],
     "outDir": "./dist",
 
     "noEmit": false,
@@ -10,5 +13,8 @@
     /* Чистый вывод */
     "declaration": false
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*",
+    "../../packages/common/src/**/*"
+  ]
 }

@@ -1,4 +1,4 @@
-import { ReasoningState } from "./types.ts";
+import { ReasoningState } from "./types.js";
 
 export enum ReasoningStep {
   DECOMPOSE = "decompose",

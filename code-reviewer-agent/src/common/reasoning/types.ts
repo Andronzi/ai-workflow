@@ -1,5 +1,5 @@
 import { Logger } from "openai/client.js";
-import { ReasoningEvent } from "./event-types.ts";
+import { ReasoningEvent } from "./event-types.js";
 
 export interface ReasoningState {
   iteration: number;

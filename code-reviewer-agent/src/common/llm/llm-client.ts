@@ -198,7 +198,7 @@ function fixJson(brokenJson: string): any {
 
   try {
     return JSON.parse(cleaned);
-  } catch (e) {
+  } catch (e: any) {
     console.error("❌ Failed to fix JSON:", e.message);
     console.log("📄 Broken content:", cleaned.substring(0, 200));
     throw new Error(`JSON parsing failed: ${e.message}`);

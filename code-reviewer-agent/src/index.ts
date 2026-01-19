@@ -30,7 +30,6 @@ app.post("/mcp", async (req: Request, res: Response) => {
   logger.info("MCP message received", {
     sender: message.sender,
     target: message.target,
-    type: message.type,
     traceId: message.traceId,
     hasDiff: !!message.payload.diff,
     hasContext: !!message.payload.context,

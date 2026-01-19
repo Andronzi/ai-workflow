@@ -3,15 +3,15 @@ import { z } from "zod";
 import {
   callLLMWithRetry,
   logLLMRequest,
-} from "../../../packages/common/src/llm/llm-client.js";
-import type { CodeReviewContext } from "../../../packages/common/src/mcp/mcp.types.js";
-import { AgentReasoningStrategy } from "../../../packages/common/src/reasoning/types.js";
+} from "../common/llm/llm-client.js";
+import type { CodeReviewContext } from "../common/mcp/mcp.types.js";
+import { AgentReasoningStrategy } from "../common/reasoning/types.js";
 
 const MAX_HYPOTHESES_PER_AREA = 4;
 const MAX_TOTAL_CHECKS = 12;
 
 export const CodeReviewStrategy: AgentReasoningStrategy = {
-  async decompose(state) {
+  async decompose(state: any) {
     const diff = state.context.diff;
     const context: CodeReviewContext = state.context.context || {};
 
@@ -90,7 +90,7 @@ Example responses:
     );
   },
 
-  async generateHypotheses(state) {
+  async generateHypotheses(state: any) {
     const diff = state.context.diff;
 
     const ExpectationsSchema = z.object({
@@ -206,7 +206,7 @@ Generate 3–5 specific potential problems in the area of "${area}".
     );
   },
 
-  async analyze(state) {
+  async analyze(state: any) {
     const diff = state.context.diff;
 
     const AnalysisSchema = z.object({
@@ -321,7 +321,7 @@ Return ONLY the JSON object.
         }
       } catch (err: any) {
         console.error(
-          `Analysis error: ${hypothesis.slice(0, 60)}...`,
+          `Analysis error: ${(hypothesis as any).slice(0, 60)}...`,
           err.message
         );
       }
@@ -332,7 +332,7 @@ Return ONLY the JSON object.
     );
   },
 
-  async reflect(state) {
+  async reflect(state: any) {
     const findingsCount = state.findings.length;
     const hasCritical = state.findings.some((f: any) => f.severity === "high");
     const weakAreas = state.weakAreas || [];
@@ -368,7 +368,7 @@ Return ONLY the JSON object.
     };
   },
 
-  async critique(state) {
+  async critique(state: any) {
     const Schema = z.object({
       confidence: z.number().min(0).max(1),
       weakAreas: z.array(z.string()).default([]),
@@ -433,7 +433,7 @@ Scoring guidelines:
     }
   },
 
-  shouldStop(state) {
+  shouldStop(state: any) {
     if (state.confidence === null) return false;
 
     const hasCritical = state.findings.some((f: any) => f.severity === "high");

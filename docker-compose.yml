@@ -2,7 +2,14 @@ version: "3.9"
 
 services:
   n8n:
-    image: n8nio/n8n
+    image: n8nio/n8n:latest  # ← используй latest, чтобы точно была свежая версия
+    # command: n8n start:contentReference[oaicite:1]{index=1}
+    environment:
+    # - WEBHOOK_TUNNEL_URL=https://indefinable-unpanelled-ute.ngrok-free.dev/
+    - WEBHOOK_URL=https://indefinable-unpanelled-ute.ngrok-free.dev
+    # - N8N_HOST=indefinable-unpanelled-ute.ngrok-free.dev
+    # - N8N_PROTOCOL=https
+    # - N8N_PORT=443
     ports:
       - "5678:5678"
     env_file:
@@ -10,35 +17,40 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     restart: unless-stopped
+    networks:
+      - asi
 
   project-manager-agent:
     build: ./project-manager-agent
     container_name: project-manager-agent
-    env_file:
-      - ./project-manager-agent/.env # Указываем путь к .env в подпапке
+    restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=production
-    restart: unless-stopped
-    # Для разработки можно добавить volumes:
-    # volumes:
-    #   - ./project-manager-agent/src:/app/src
-    #   - ./project-manager-agent/.env:/app/.env
+      NODE_ENV: production
+      # Добавьте нужные переменные, если они не в .env
+    env_file:
+      - ./project-manager-agent/.env
+    networks:
+      - asi
+
   code-reviewer-agent:
     build: ./code-reviewer-agent
     container_name: code-reviewer-agent
-    env_file:
-      - ./code-reviewer-agent/.env # Указываем путь к .env в подпапке
-    ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
     restart: unless-stopped
-    # Для разработки можно добавить volumes:
-    # volumes:
-    #   - ./project-manager-agent/src:/app/src
-    #   - ./project-manager-agent/.env:/app/.env
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: production
+    env_file:
+      - ./code-reviewer-agent/.env
+    networks:
+      - asi
+
+networks:
+  asi:
+    name: asi
+    external: true
 
 volumes:
   n8n_data:
