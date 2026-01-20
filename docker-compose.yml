@@ -1,6 +1,30 @@
 version: "3.9"
 
 services:
+  prometheus:
+    container_name: ai-workflow-prometheus
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - asi
+    restart: unless-stopped
+
+  grafana:
+    container_name: ai-workflow-grafana
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    networks:
+      - asi
+    restart: unless-stopped
+
   n8n:
     image: n8nio/n8n:latest  # ← используй latest, чтобы точно была свежая версия
     # command: n8n start:contentReference[oaicite:1]{index=1}

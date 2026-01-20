@@ -5,6 +5,8 @@ import express, { Request, Response } from "express";
 import { AgentLogger } from "./logger/logger.js";
 import { MCPMessageSchema } from "./mcp/mcp.types.js";
 import { runCodeReview } from "./reasoning/run.js";
+import { agentRunsTotal, register } from "./metrics/metrics.js";
+
 
 dotenv.config();
 
@@ -40,6 +42,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
 
   try {
     const startTime = Date.now();
+    agentRunsTotal.inc({ agent: "code-reviewer", status: "started" });
 
     const result = await runCodeReview({
       diff: message.payload.diff,
@@ -55,6 +58,8 @@ app.post("/mcp", async (req: Request, res: Response) => {
       findingsCount: result.findings?.length || 0,
       confidence: result.confidence || 0,
     });
+
+    agentRunsTotal.inc({ agent: "code-reviewer", status: "success" });
 
     const response = {
       agent: "code-reviewer",
@@ -81,6 +86,8 @@ app.post("/mcp", async (req: Request, res: Response) => {
       stack: err.stack,
       name: err.name,
     });
+
+    agentRunsTotal.inc({ agent: "code-reviewer", status: "error" });
 
     res.status(500).json({
       agent: "code-reviewer",
@@ -113,6 +120,11 @@ app.get("/", (req: Request, res: Response) => {
     },
     supportedTypes: ["code-review"],
   });
+});
+
+app.get("/metrics", async (_, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
 });
 
 const PORT = process.env.PORT ?? 3002;

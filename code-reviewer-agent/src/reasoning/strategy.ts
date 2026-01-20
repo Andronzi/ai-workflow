@@ -6,6 +6,7 @@ import {
 } from "../common/llm/llm-client.js";
 import type { CodeReviewContext } from "../common/mcp/mcp.types.js";
 import { AgentReasoningStrategy } from "../common/reasoning/types.js";
+import { confidenceGauge, findingsTotal } from "../metrics/metrics.js";
 
 const MAX_HYPOTHESES_PER_AREA = 4;
 const MAX_TOTAL_CHECKS = 12;
@@ -387,6 +388,8 @@ Return ONLY JSON:
 
     const uniqueAreas = new Set(
       state.findings.map((f: any) => {
+        findingsTotal.inc({ severity: f.severity });
+
         return (
           Object.keys(state.knowledge.hypotheses || {}).find((a) =>
             f.hypothesis.toLowerCase().includes(a.toLowerCase())
@@ -435,6 +438,8 @@ Scoring guidelines:
 
   shouldStop(state: any) {
     if (state.confidence === null) return false;
+
+    confidenceGauge.set(state.confidence);
 
     const hasCritical = state.findings.some((f: any) => f.severity === "high");
     const riskHigh = state.knowledge.riskLevel === "high";
