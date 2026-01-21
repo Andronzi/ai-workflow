@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    /* Target */
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    /* ESM / Node */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@schemas/*": ["src/schemas/*"],
+      "@services/*": ["src/services/*"],
+      "@common/*": ["../../packages/common/src/*"],
+    },
+
+    /* Strictness */
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    /* Interop */
+    "esModuleInterop": true,
+
+    /* Utils */
+    "resolveJsonModule": true,
+    "sourceMap": true
+  }
+}

@@ -26,11 +26,11 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:latest  # ← используй latest, чтобы точно была свежая версия
+    image: n8nio/n8n:latest # ← используй latest, чтобы точно была свежая версия
     # command: n8n start:contentReference[oaicite:1]{index=1}
     environment:
-    # - WEBHOOK_TUNNEL_URL=https://indefinable-unpanelled-ute.ngrok-free.dev/
-    - WEBHOOK_URL=https://indefinable-unpanelled-ute.ngrok-free.dev
+      # - WEBHOOK_TUNNEL_URL=https://indefinable-unpanelled-ute.ngrok-free.dev/
+      - WEBHOOK_URL=https://indefinable-unpanelled-ute.ngrok-free.dev
     # - N8N_HOST=indefinable-unpanelled-ute.ngrok-free.dev
     # - N8N_PROTOCOL=https
     # - N8N_PORT=443
@@ -41,20 +41,6 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     restart: unless-stopped
-    networks:
-      - asi
-
-  project-manager-agent:
-    build: ./project-manager-agent
-    container_name: project-manager-agent
-    restart: unless-stopped
-    ports:
-      - "3001:3001"
-    environment:
-      NODE_ENV: production
-      # Добавьте нужные переменные, если они не в .env
-    env_file:
-      - ./project-manager-agent/.env
     networks:
       - asi
 

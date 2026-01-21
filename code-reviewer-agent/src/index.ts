@@ -2,11 +2,11 @@
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import express, { Request, Response } from "express";
+import { handleAgentTask } from "./agent-core.ts";
 import { AgentLogger } from "./logger/logger.js";
 import { MCPMessageSchema } from "./mcp/mcp.types.js";
-import { runCodeReview } from "./reasoning/run.js";
 import { agentRunsTotal, register } from "./metrics/metrics.js";
-
+import { runCodeReview } from "./reasoning/run.js";
 
 dotenv.config();
 
@@ -15,7 +15,19 @@ app.use(bodyParser.json({ limit: "10mb" }));
 
 let tasksProcessed = 0;
 
-app.post("/mcp", async (req: Request, res: Response) => {
+app.post("/mcp", async (req, res) => {
+  try {
+    const result = await handleAgentTask(req.body);
+    res.json({ jsonrpc: "2.0", result });
+  } catch (err: any) {
+    res.json({
+      jsonrpc: "2.0",
+      error: { message: err.message },
+    });
+  }
+});
+
+app.post("/mcp-http-legacy", async (req: Request, res: Response) => {
   let message;
   try {
     message = MCPMessageSchema.parse(req.body);

@@ -1,0 +1,20 @@
+{
+  "tools": [
+    {
+      "name": "github.getPullRequest",
+      "description": "Fetch PR metadata and diff",
+      "tags": ["github", "diff", "source"],
+      "type": "http",
+      "http": { "url": "http://localhost:4000/git-fetch/call" }
+    },
+    {
+      "name": "agent.codeReview",
+      "type": "http",
+      "description": "Code review agent as HTTP service",
+      "tags": ["agent", "code", "review"],
+      "http": {
+        "url": "http://code-reviewer-agent:3002/mcp"
+      }
+    }
+  ]
+}

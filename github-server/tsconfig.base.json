@@ -13,7 +13,8 @@
     "paths": {
       "@/*": ["src/*"],
       "@schemas/*": ["src/schemas/*"],
-      "@services/*": ["src/services/*"]
+      "@services/*": ["src/services/*"],
+      "@common/*": ["../../packages/common/src/*"],
     },
 
     /* Strictness */
